@@ -1,0 +1,83 @@
+# -------------------------
+# Big data / datasets
+# -------------------------
+data/
+dataset/
+datasets/
+raw_data/
+processed_data/
+outputs/
+artifacts/
+runs/
+logs/
+tmp/
+
+# Common large dataset formats
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+*.gz
+*.bz2
+*.xz
+*.iso
+
+# Tabular / scientific (often large)
+*.csv
+*.tsv
+*.parquet
+*.feather
+*.h5
+*.hdf5
+*.npz
+*.npy
+*.mat
+*.pkl
+*.pickle
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# ML / checkpoints (often huge)
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.tflite
+
+# Robotics (often huge)
+*.bag
+
+# -------------------------
+# Build / cache / env
+# -------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+build/
+dist/
+*.o
+*.obj
+*.so
+*.dll
+*.dylib
+*.exe
+
+# -------------------------
+# OS / editor junk
+# -------------------------
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+.vscode/
+.idea/
+*.swp
