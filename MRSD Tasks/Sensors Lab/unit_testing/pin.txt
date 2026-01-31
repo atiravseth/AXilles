@@ -1,0 +1,13 @@
+DC encoder chA	D2
+	   chB	D3
+DC motor   I1   D7
+           I2	D8
+	   Ena	D5
+
+Step motor step D9
+           dir  D10
+Servo motor     D6
+
+
+potentiometer   A0
+FSR		A1
