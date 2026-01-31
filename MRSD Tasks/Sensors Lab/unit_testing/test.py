@@ -1,6 +1,8 @@
 from pyfirmata2 import Arduino, util
 import time
 
+#this is to test the git pull
+
 
 PORT = 'COM21'   
 board = Arduino(PORT)
