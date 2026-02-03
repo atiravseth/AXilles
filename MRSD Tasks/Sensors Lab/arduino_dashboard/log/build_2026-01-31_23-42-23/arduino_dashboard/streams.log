@@ -1,0 +1,28 @@
+[0.330s] Invoking command in '/root/ros2_ws/SensorLab/arduino_dashboard': PYTHONPATH=/root/ros2_ws/SensorLab/arduino_dashboard/build/arduino_dashboard/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/root/ros2_ws/SensorLab/arduino_dashboard/install/arduino_dashboard/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base build/arduino_dashboard build --build-base /root/ros2_ws/SensorLab/arduino_dashboard/build/arduino_dashboard/build install --record /root/ros2_ws/SensorLab/arduino_dashboard/build/arduino_dashboard/install.log --single-version-externally-managed install_data
+[0.454s] running egg_info
+[0.455s] writing build/arduino_dashboard/arduino_dashboard.egg-info/PKG-INFO
+[0.455s] writing dependency_links to build/arduino_dashboard/arduino_dashboard.egg-info/dependency_links.txt
+[0.455s] writing entry points to build/arduino_dashboard/arduino_dashboard.egg-info/entry_points.txt
+[0.455s] writing requirements to build/arduino_dashboard/arduino_dashboard.egg-info/requires.txt
+[0.455s] writing top-level names to build/arduino_dashboard/arduino_dashboard.egg-info/top_level.txt
+[0.456s] reading manifest file 'build/arduino_dashboard/arduino_dashboard.egg-info/SOURCES.txt'
+[0.456s] writing manifest file 'build/arduino_dashboard/arduino_dashboard.egg-info/SOURCES.txt'
+[0.456s] running build
+[0.456s] running build_py
+[0.457s] copying arduino_dashboard/arduino_dashboard_plugin.py -> /root/ros2_ws/SensorLab/arduino_dashboard/build/arduino_dashboard/build/lib/arduino_dashboard
+[0.457s] copying arduino_dashboard/serial_node.py -> /root/ros2_ws/SensorLab/arduino_dashboard/build/arduino_dashboard/build/lib/arduino_dashboard
+[0.457s] running install
+[0.457s] running install_lib
+[0.457s] copying /root/ros2_ws/SensorLab/arduino_dashboard/build/arduino_dashboard/build/lib/arduino_dashboard/arduino_dashboard_plugin.py -> /root/ros2_ws/SensorLab/arduino_dashboard/install/arduino_dashboard/lib/python3.10/site-packages/arduino_dashboard
+[0.458s] copying /root/ros2_ws/SensorLab/arduino_dashboard/build/arduino_dashboard/build/lib/arduino_dashboard/serial_node.py -> /root/ros2_ws/SensorLab/arduino_dashboard/install/arduino_dashboard/lib/python3.10/site-packages/arduino_dashboard
+[0.458s] byte-compiling /root/ros2_ws/SensorLab/arduino_dashboard/install/arduino_dashboard/lib/python3.10/site-packages/arduino_dashboard/arduino_dashboard_plugin.py to arduino_dashboard_plugin.cpython-310.pyc
+[0.458s] byte-compiling /root/ros2_ws/SensorLab/arduino_dashboard/install/arduino_dashboard/lib/python3.10/site-packages/arduino_dashboard/serial_node.py to serial_node.cpython-310.pyc
+[0.459s] running install_data
+[0.459s] copying launch/dashboard.launch.py -> /root/ros2_ws/SensorLab/arduino_dashboard/install/arduino_dashboard/share/arduino_dashboard/launch
+[0.459s] running install_egg_info
+[0.460s] removing '/root/ros2_ws/SensorLab/arduino_dashboard/install/arduino_dashboard/lib/python3.10/site-packages/arduino_dashboard-0.0.1-py3.10.egg-info' (and everything under it)
+[0.461s] Copying build/arduino_dashboard/arduino_dashboard.egg-info to /root/ros2_ws/SensorLab/arduino_dashboard/install/arduino_dashboard/lib/python3.10/site-packages/arduino_dashboard-0.0.1-py3.10.egg-info
+[0.461s] running install_scripts
+[0.471s] Installing serial_node script to /root/ros2_ws/SensorLab/arduino_dashboard/install/arduino_dashboard/lib/arduino_dashboard
+[0.472s] writing list of installed files to '/root/ros2_ws/SensorLab/arduino_dashboard/build/arduino_dashboard/install.log'
+[0.485s] Invoked command in '/root/ros2_ws/SensorLab/arduino_dashboard' returned '0': PYTHONPATH=/root/ros2_ws/SensorLab/arduino_dashboard/build/arduino_dashboard/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/root/ros2_ws/SensorLab/arduino_dashboard/install/arduino_dashboard/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base build/arduino_dashboard build --build-base /root/ros2_ws/SensorLab/arduino_dashboard/build/arduino_dashboard/build install --record /root/ros2_ws/SensorLab/arduino_dashboard/build/arduino_dashboard/install.log --single-version-externally-managed install_data

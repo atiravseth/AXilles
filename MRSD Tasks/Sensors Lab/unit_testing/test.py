@@ -1,7 +1,6 @@
 from pyfirmata2 import Arduino, util
 import time
 
-
 PORT = 'COM21'   
 board = Arduino(PORT)
 
