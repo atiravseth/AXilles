@@ -5,13 +5,16 @@ Arduino Serial Node for ROS2 Dashboard
 Command Format (sent to Arduino): Single letter followed by a number
   V90  - Set servo to 90 degrees
   T400 - Set stepper position (0-720 maps to -360 to 360)
-  P128 - Set DC motor PWM/velocity (0-255)
+  P128 - Set DC motor PWM/velocity (0-255) - velocity mode
+  M500 - Set DC motor target position - position mode
   D1   - Set DC motor direction to CCW
   D0   - Set DC motor direction to CW
   G1   - GUI control enabled
   G0   - GUI control disabled
   C1   - Control mode 1 (GUI control)
   C2   - Control mode 2 (Sensor-based autonomous)
+  Qvelocity   - DC control mode: velocity
+  Qposition   - DC control mode: position
 
 Sensor Format (received from Arduino): Letter followed by value
   P512 - Potentiometer reading = 512
@@ -21,7 +24,7 @@ Sensor Format (received from Arduino): Letter followed by value
 """
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Int32, Bool, Float32
+from std_msgs.msg import Int32, Bool, Float32, String
 import serial
 import serial.tools.list_ports
 import threading
@@ -63,12 +66,15 @@ class ArduinoSerialNode(Node):
         self._dc_dir_ccw = False  # False = CW, True = CCW
         self._gui_on = False
         self._control_mode = 1  # 1 = GUI, 2 = Sensor-based autonomous
+        self._dc_control_mode = 'velocity'  # 'velocity' or 'position'  # ADDED
         
         # Track last sent values to avoid redundant sends
         self._last_servo = -1
         self._last_step = -1
         self._last_dc_vel = -1
+        self._last_dc_pos = -1  # ADDED
         self._last_dc_dir = None
+        self._last_dc_control_mode = None  # ADDED
         
         # Simulation state
         self._sim_state = 0
@@ -89,6 +95,7 @@ class ArduinoSerialNode(Node):
         self.create_subscription(Bool, '/arduino/cmd/dc_dir', self._dc_dir_callback, 10)
         self.create_subscription(Bool, '/arduino/cmd/gui_on', self._gui_on_callback, 10)
         self.create_subscription(Int32, '/arduino/cmd/control_mode', self._control_mode_callback, 10)
+        self.create_subscription(String, '/arduino/cmd/dc_control_mode', self._dc_control_mode_callback, 10)  # ADDED
         
         # Timer to read serial data
         self.read_timer = self.create_timer(0.05, self.read_serial)  # 20 Hz
@@ -133,22 +140,13 @@ class ArduinoSerialNode(Node):
         self.get_logger().debug(f'Servo command: {msg.data}')
         
     def _step_callback(self, msg):
-        """Handle step command - sends T followed by mapped position (0-720)
-        
-        GUI sends 0-200, we map it to stepper range:
-        The Arduino expects 0-720 where:
-          0-360 maps to position 0 to 360
-          361-720 maps to position -360 to -1
-        """
+        """Handle step command - sends T followed by mapped position (0-720)"""
         with self._lock:
             self._step_cmd = msg.data
             if self._gui_on and self._step_cmd != self._last_step:
-                # Map GUI value (0-200) to Arduino range (0-720)
-                # For simplicity, we'll scale 0-200 to 0-400 (covering -200 to 200 range)
                 mapped_value = self._step_cmd
                 if mapped_value < 0:
-                    # Negative values: map to 361-720
-                    mapped_value = 721 + mapped_value  # e.g., -100 -> 621
+                    mapped_value = 721 + mapped_value
                 self._send_command(f"T{mapped_value}")
                 self._last_step = self._step_cmd
         self.get_logger().debug(f'Step command: {msg.data}')
@@ -157,17 +155,20 @@ class ArduinoSerialNode(Node):
         """Handle DC velocity command - sends P followed by PWM value (0-255)"""
         with self._lock:
             self._dc_vel_cmd = msg.data
-            if self._gui_on and self._dc_vel_cmd != self._last_dc_vel:
+            # Only send if in velocity mode
+            if self._gui_on and self._dc_control_mode == 'velocity' and self._dc_vel_cmd != self._last_dc_vel:
                 self._send_command(f"P{self._dc_vel_cmd}")
                 self._last_dc_vel = self._dc_vel_cmd
         self.get_logger().debug(f'DC Vel command: {msg.data}')
         
     def _dc_pos_callback(self, msg):
-        """Handle DC position command - for position control mode"""
+        """Handle DC position command - sends M followed by target position"""
         with self._lock:
             self._dc_pos_cmd = msg.data
-            # DC position could be sent as a separate command if needed
-            # For now, we use velocity control
+            # Only send if in position mode
+            if self._gui_on and self._dc_control_mode == 'position' and self._dc_pos_cmd != self._last_dc_pos:
+                self._send_command(f"M{self._dc_pos_cmd}")
+                self._last_dc_pos = self._dc_pos_cmd
         self.get_logger().debug(f'DC Pos command: {msg.data}')
         
     def _dc_dir_callback(self, msg):
@@ -179,6 +180,25 @@ class ArduinoSerialNode(Node):
                 self._send_command(f"D{dir_val}")
                 self._last_dc_dir = self._dc_dir_ccw
         self.get_logger().debug(f'DC Dir command: {"CCW" if msg.data else "CW"}')
+    
+    # ==================== ADDED: DC CONTROL MODE CALLBACK ====================
+    def _dc_control_mode_callback(self, msg):
+        """Handle DC control mode command - sends Qvelocity or Qposition"""
+        with self._lock:
+            mode = msg.data.lower()
+            if mode in ['velocity', 'position']:
+                self._dc_control_mode = mode
+                
+                if self._gui_on and self._dc_control_mode != self._last_dc_control_mode:
+                    self._send_command(f"Q{mode}")
+                    self._last_dc_control_mode = self._dc_control_mode
+                    
+                    # Reset tracking for position/velocity
+                    self._last_dc_vel = -1
+                    self._last_dc_pos = -1
+                    
+                self.get_logger().info(f'DC Control Mode: {mode}')
+    # ==================== END DC CONTROL MODE CALLBACK ====================
         
     def _gui_on_callback(self, msg):
         """Handle GUI ON command - sends G1 to enable, G0 to disable"""
@@ -192,7 +212,9 @@ class ArduinoSerialNode(Node):
                 self._last_servo = -1
                 self._last_step = -1
                 self._last_dc_vel = -1
+                self._last_dc_pos = -1
                 self._last_dc_dir = None
+                self._last_dc_control_mode = None
                 
         self.get_logger().info(f'GUI ON: {msg.data}')
     
@@ -228,8 +250,8 @@ class ArduinoSerialNode(Node):
         # State cycles through 0-5
         self._sim_state = int(t) % 6
         
-        # Sensor value oscillates (simulating potentiometer 0-1023)
-        self._sim_sensor = 512.0 + 300.0 * math.sin(t * 0.5)
+        # Sensor value oscillates (simulating potentiometer 0-4095)
+        self._sim_sensor = 2048.0 + 1500.0 * math.sin(t * 0.5)
         
         # Publish state
         state_msg = Int32()
@@ -241,24 +263,30 @@ class ArduinoSerialNode(Node):
         sensor_msg.data = self._sim_sensor
         self.sensor_pub.publish(sensor_msg)
         
-        # Publish potentiometer
+        # Publish potentiometer (0-4095 for ESP32)
         pot_msg = Int32()
         pot_msg.data = int(self._sim_sensor)
         self.potentiometer_pub.publish(pot_msg)
         
-        # Publish FSR (simulated)
-        fsr_value = 200 + 150 * math.sin(t * 0.3)
+        # Publish FSR (simulated, 0-4095 for ESP32)
+        fsr_value = 1000 + 800 * math.sin(t * 0.3)
         fsr_msg = Int32()
         fsr_msg.data = int(fsr_value)
         self.fsr_pub.publish(fsr_msg)
+        
+        # Publish encoder (simulated)
+        encoder_value = int(100 * math.sin(t * 0.2))
+        enc_msg = Int32()
+        enc_msg.data = encoder_value
+        self.encoder_pub.publish(enc_msg)
             
     def parse_data(self, line):
         """
         Parse Arduino data in letter+value format
         
         Expected formats:
-          P512 - Potentiometer reading (0-1023)
-          F200 - FSR sensor reading (0-1023)
+          P512 - Potentiometer reading (0-4095 for ESP32)
+          F200 - FSR sensor reading (0-4095 for ESP32)
           E45  - Encoder position
           X1   - Current state
         """
@@ -307,7 +335,7 @@ class ArduinoSerialNode(Node):
                 self.get_logger().debug(f'State: {value}')
                 
             else:
-                # Unknown command type, try to parse as debug message
+                # Unknown command type, log as debug message
                 self.get_logger().debug(f'Arduino: {line}')
                 
         except ValueError as e:

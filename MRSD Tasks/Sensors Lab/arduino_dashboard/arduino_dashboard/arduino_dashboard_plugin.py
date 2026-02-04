@@ -6,18 +6,19 @@ from rqt_gui_py.plugin import Plugin
 from python_qt_binding.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QSlider, QCheckBox, QPushButton, QFrame, QGridLayout,
-    QGroupBox, QSpinBox, QProgressBar
+    QGroupBox, QSpinBox, QProgressBar, QRadioButton, QButtonGroup
 )
 from python_qt_binding.QtCore import Qt, QTimer, Signal, QObject
 from python_qt_binding.QtGui import QFont, QPalette, QColor
 from std_msgs.msg import Int32, Bool, String, Float32
 
-
 class SignalBridge(QObject):
     """Bridge for thread-safe signal emission"""
     state_changed = Signal(int)
     sensor_changed = Signal(float)
-
+    pot_changed = Signal(int)
+    fsr_changed = Signal(int)
+    encoder_changed = Signal(int)
 
 class ArduinoDashboard(Plugin):
     def __init__(self, context):
@@ -37,6 +38,9 @@ class ArduinoDashboard(Plugin):
         self._signals = SignalBridge()
         self._signals.state_changed.connect(self._on_state_changed)
         self._signals.sensor_changed.connect(self._on_sensor_changed)
+        self._signals.pot_changed.connect(self._on_pot_changed)
+        self._signals.fsr_changed.connect(self._on_fsr_changed)
+        self._signals.encoder_changed.connect(self._on_encoder_changed)
         
         # Current values
         self._servo_value = 0
@@ -44,9 +48,13 @@ class ArduinoDashboard(Plugin):
         self._dc_vel_value = 0
         self._dc_pos_value = 0
         self._dc_direction_cw = True  # True = CW, False = CCW
+        self._dc_control_mode = 'velocity'  # 'velocity' or 'position'  # NEW
         self._gui_on = False
         self._current_state = 0
         self._sensor_value = 0.0
+        self._pot_value = 0
+        self._fsr_value = 0
+        self._encoder_value = 0
         self._control_mode = 1  # 1 = GUI Control, 2 = Sensor-Based Autonomous
         
         # Build the UI
@@ -145,6 +153,22 @@ class ArduinoDashboard(Plugin):
             QCheckBox::indicator:checked {
                 background: #48bb78;
                 border-color: #48bb78;
+            }
+            QRadioButton {
+                color: #2d3748;
+                font-size: 12px;
+                spacing: 8px;
+            }
+            QRadioButton::indicator {
+                width: 18px;
+                height: 18px;
+                border: 2px solid #a0aec0;
+                border-radius: 9px;
+                background: white;
+            }
+            QRadioButton::indicator:checked {
+                background: #4299e1;
+                border-color: #4299e1;
             }
             QPushButton {
                 background-color: #4299e1;
@@ -248,6 +272,35 @@ class ArduinoDashboard(Plugin):
         motors_group.setLayout(motors_layout)
         left_column.addWidget(motors_group)
         
+        # ==================== NEW: DC MOTOR CONTROL MODE ====================
+        dc_mode_group = QGroupBox("DC Motor Control Mode")
+        dc_mode_layout = QVBoxLayout()
+        
+        # Radio buttons for velocity vs position
+        self._dc_velocity_radio = QRadioButton("⚡ Velocity Control")
+        self._dc_velocity_radio.setChecked(True)
+        self._dc_velocity_radio.toggled.connect(self._on_dc_mode_changed)
+        
+        self._dc_position_radio = QRadioButton("📍 Position Control (Encoder)")
+        
+        # Button group to make them mutually exclusive
+        self._dc_mode_button_group = QButtonGroup()
+        self._dc_mode_button_group.addButton(self._dc_velocity_radio)
+        self._dc_mode_button_group.addButton(self._dc_position_radio)
+        
+        dc_mode_layout.addWidget(self._dc_velocity_radio)
+        dc_mode_layout.addWidget(self._dc_position_radio)
+        
+        # Info label
+        self._dc_mode_info = QLabel("VEL: Direct PWM control")
+        self._dc_mode_info.setStyleSheet("color: #718096; font-size: 10px; padding: 5px;")
+        self._dc_mode_info.setWordWrap(True)
+        dc_mode_layout.addWidget(self._dc_mode_info)
+        
+        dc_mode_group.setLayout(dc_mode_layout)
+        left_column.addWidget(dc_mode_group)
+        # ==================== END DC MOTOR CONTROL MODE ====================
+        
         # DC Direction toggle
         dir_group = QGroupBox("DC Motor Direction")
         dir_layout = QHBoxLayout()
@@ -350,37 +403,112 @@ class ArduinoDashboard(Plugin):
         state_group.setLayout(state_layout)
         right_column.addWidget(state_group)
         
-        # Sensor display
-        sensor_group = QGroupBox("Sensor Reading")
-        sensor_layout = QVBoxLayout()
+        # Sensor readings group
+        sensors_group = QGroupBox("📊 Sensor Readings")
+        sensors_layout = QVBoxLayout()
+        sensors_layout.setSpacing(8)
         
-        self._sensor_label = QLabel("0.0")
-        self._sensor_label.setStyleSheet("""
-            font-size: 36px; 
+        # Potentiometer reading
+        pot_layout = QHBoxLayout()
+        pot_icon = QLabel("🎚️")
+        pot_icon.setStyleSheet("font-size: 20px;")
+        pot_label = QLabel("POT:")
+        pot_label.setStyleSheet("font-weight: bold; color: #4a5568;")
+        self._pot_value_label = QLabel("0")
+        self._pot_value_label.setStyleSheet("""
+            font-size: 18px; 
+            font-weight: bold; 
+            color: #2b6cb0;
+            background-color: #ebf8ff;
+            border-radius: 6px;
+            padding: 5px 10px;
+        """)
+        self._pot_value_label.setMinimumWidth(80)
+        self._pot_value_label.setAlignment(Qt.AlignCenter)
+        pot_layout.addWidget(pot_icon)
+        pot_layout.addWidget(pot_label)
+        pot_layout.addStretch()
+        pot_layout.addWidget(self._pot_value_label)
+        sensors_layout.addLayout(pot_layout)
+        
+        # Potentiometer progress bar
+        self._pot_bar = QProgressBar()
+        self._pot_bar.setMinimum(0)
+        self._pot_bar.setMaximum(4095)
+        self._pot_bar.setValue(0)
+        self._pot_bar.setTextVisible(False)
+        self._pot_bar.setFixedHeight(8)
+        sensors_layout.addWidget(self._pot_bar)
+        
+        # FSR reading
+        fsr_layout = QHBoxLayout()
+        fsr_icon = QLabel("👆")
+        fsr_icon.setStyleSheet("font-size: 20px;")
+        fsr_label = QLabel("FSR:")
+        fsr_label.setStyleSheet("font-weight: bold; color: #4a5568;")
+        self._fsr_value_label = QLabel("0")
+        self._fsr_value_label.setStyleSheet("""
+            font-size: 18px; 
+            font-weight: bold; 
+            color: #d69e2e;
+            background-color: #fefcbf;
+            border-radius: 6px;
+            padding: 5px 10px;
+        """)
+        self._fsr_value_label.setMinimumWidth(80)
+        self._fsr_value_label.setAlignment(Qt.AlignCenter)
+        fsr_layout.addWidget(fsr_icon)
+        fsr_layout.addWidget(fsr_label)
+        fsr_layout.addStretch()
+        fsr_layout.addWidget(self._fsr_value_label)
+        sensors_layout.addLayout(fsr_layout)
+        
+        # FSR progress bar
+        self._fsr_bar = QProgressBar()
+        self._fsr_bar.setMinimum(0)
+        self._fsr_bar.setMaximum(4095)
+        self._fsr_bar.setValue(0)
+        self._fsr_bar.setTextVisible(False)
+        self._fsr_bar.setFixedHeight(8)
+        self._fsr_bar.setStyleSheet("""
+            QProgressBar {
+                border: none;
+                border-radius: 4px;
+                background-color: #fef5e7;
+                height: 8px;
+            }
+            QProgressBar::chunk {
+                background: qlineargradient(x1:0, x2:1, stop:0 #f6ad55, stop:1 #ed8936);
+                border-radius: 4px;
+            }
+        """)
+        sensors_layout.addWidget(self._fsr_bar)
+        
+        # Encoder reading
+        enc_layout = QHBoxLayout()
+        enc_icon = QLabel("⚙️")
+        enc_icon.setStyleSheet("font-size: 20px;")
+        enc_label = QLabel("ENC:")
+        enc_label.setStyleSheet("font-weight: bold; color: #4a5568;")
+        self._encoder_value_label = QLabel("0")
+        self._encoder_value_label.setStyleSheet("""
+            font-size: 18px; 
             font-weight: bold; 
             color: #38a169;
             background-color: #f0fff4;
-            border-radius: 10px;
-            padding: 12px;
+            border-radius: 6px;
+            padding: 5px 10px;
         """)
-        self._sensor_label.setAlignment(Qt.AlignCenter)
-        sensor_layout.addWidget(self._sensor_label)
+        self._encoder_value_label.setMinimumWidth(80)
+        self._encoder_value_label.setAlignment(Qt.AlignCenter)
+        enc_layout.addWidget(enc_icon)
+        enc_layout.addWidget(enc_label)
+        enc_layout.addStretch()
+        enc_layout.addWidget(self._encoder_value_label)
+        sensors_layout.addLayout(enc_layout)
         
-        # Progress bar for sensor
-        self._sensor_bar = QProgressBar()
-        self._sensor_bar.setMinimum(0)
-        self._sensor_bar.setMaximum(100)
-        self._sensor_bar.setValue(0)
-        self._sensor_bar.setTextVisible(False)
-        sensor_layout.addWidget(self._sensor_bar)
-        
-        sensor_desc = QLabel("Analog Value")
-        sensor_desc.setStyleSheet("color: #718096; font-size: 11px;")
-        sensor_desc.setAlignment(Qt.AlignCenter)
-        sensor_layout.addWidget(sensor_desc)
-        
-        sensor_group.setLayout(sensor_layout)
-        right_column.addWidget(sensor_group)
+        sensors_group.setLayout(sensors_layout)
+        right_column.addWidget(sensors_group)
         
         right_column.addStretch()
         
@@ -389,7 +517,7 @@ class ArduinoDashboard(Plugin):
         main_layout.addLayout(right_column, stretch=1)
         
         self._widget.setLayout(main_layout)
-        self._widget.setMinimumSize(550, 450)
+        self._widget.setMinimumSize(550, 600)
         
     def _create_ros_interfaces(self):
         """Create ROS2 publishers and subscribers"""
@@ -401,6 +529,7 @@ class ArduinoDashboard(Plugin):
         self._dc_dir_pub = self._node.create_publisher(Bool, '/arduino/cmd/dc_dir', 10)
         self._gui_on_pub = self._node.create_publisher(Bool, '/arduino/cmd/gui_on', 10)
         self._control_mode_pub = self._node.create_publisher(Int32, '/arduino/cmd/control_mode', 10)
+        self._dc_control_mode_pub = self._node.create_publisher(String, '/arduino/cmd/dc_control_mode', 10)  # NEW
         
         # Subscribers for state and sensor data
         self._node.create_subscription(
@@ -409,6 +538,43 @@ class ArduinoDashboard(Plugin):
         self._node.create_subscription(
             Float32, '/arduino/sensor',
             self._sensor_callback, 10)
+        self._node.create_subscription(
+            Int32, '/arduino/pot',
+            self._pot_callback, 10)
+        self._node.create_subscription(
+            Int32, '/arduino/fsr',
+            self._fsr_callback, 10)
+        self._node.create_subscription(
+            Int32, '/arduino/encoder',
+            self._encoder_callback, 10)
+    
+    # ==================== NEW: DC CONTROL MODE HANDLER ====================
+    def _on_dc_mode_changed(self, checked):
+        """Handle DC motor control mode change"""
+        if self._dc_velocity_radio.isChecked():
+            self._dc_control_mode = 'velocity'
+            self._dc_mode_info.setText("VEL: Direct PWM control")
+            # Enable velocity slider, disable position slider
+            self._sliders[2].setEnabled(True)
+            self._spinboxes[2].setEnabled(True)
+            self._sliders[3].setEnabled(False)
+            self._spinboxes[3].setEnabled(False)
+        else:
+            self._dc_control_mode = 'position'
+            self._dc_mode_info.setText("POS: Encoder feedback control")
+            # Disable velocity slider, enable position slider
+            self._sliders[2].setEnabled(False)
+            self._spinboxes[2].setEnabled(False)
+            self._sliders[3].setEnabled(True)
+            self._spinboxes[3].setEnabled(True)
+        
+        # Publish mode change
+        if self._gui_on:
+            msg = String()
+            msg.data = self._dc_control_mode
+            self._dc_control_mode_pub.publish(msg)
+            self._node.get_logger().info(f'DC Control Mode: {self._dc_control_mode}')
+    # ==================== END DC CONTROL MODE HANDLER ====================
             
     def _on_servo_changed(self, value):
         """Handle servo slider change"""
@@ -429,7 +595,7 @@ class ArduinoDashboard(Plugin):
     def _on_dc_vel_changed(self, value):
         """Handle DC velocity slider change"""
         self._dc_vel_value = value
-        if self._gui_on:
+        if self._gui_on and self._dc_control_mode == 'velocity':
             msg = Int32()
             msg.data = value
             self._dc_vel_pub.publish(msg)
@@ -437,7 +603,7 @@ class ArduinoDashboard(Plugin):
     def _on_dc_pos_changed(self, value):
         """Handle DC position slider change"""
         self._dc_pos_value = value
-        if self._gui_on:
+        if self._gui_on and self._dc_control_mode == 'position':
             msg = Int32()
             msg.data = value
             self._dc_pos_pub.publish(msg)
@@ -491,11 +657,17 @@ class ArduinoDashboard(Plugin):
                 }
             """)
             self._mode_desc.setText("GUI: Sliders control motors")
-            # Enable sliders in GUI mode
-            for slider in self._sliders:
-                slider.setEnabled(True)
-            for spinbox in self._spinboxes:
-                spinbox.setEnabled(True)
+            # Enable controls based on DC mode
+            for i, slider in enumerate(self._sliders):
+                if i == 2:  # DC VEL
+                    slider.setEnabled(self._dc_control_mode == 'velocity')
+                    self._spinboxes[i].setEnabled(self._dc_control_mode == 'velocity')
+                elif i == 3:  # DC POS
+                    slider.setEnabled(self._dc_control_mode == 'position')
+                    self._spinboxes[i].setEnabled(self._dc_control_mode == 'position')
+                else:
+                    slider.setEnabled(True)
+                    self._spinboxes[i].setEnabled(True)
         else:
             self._mode1_button.setStyleSheet("""
                 QPushButton {
@@ -582,17 +754,23 @@ class ArduinoDashboard(Plugin):
         msg.data = self._control_mode
         self._control_mode_pub.publish(msg)
         
+        # Send DC control mode
+        dc_mode_msg = String()
+        dc_mode_msg.data = self._dc_control_mode
+        self._dc_control_mode_pub.publish(dc_mode_msg)
+        
         msg.data = self._servo_value
         self._servo_pub.publish(msg)
         
         msg.data = self._step_value
         self._step_pub.publish(msg)
         
-        msg.data = self._dc_vel_value
-        self._dc_vel_pub.publish(msg)
-        
-        msg.data = self._dc_pos_value
-        self._dc_pos_pub.publish(msg)
+        if self._dc_control_mode == 'velocity':
+            msg.data = self._dc_vel_value
+            self._dc_vel_pub.publish(msg)
+        else:
+            msg.data = self._dc_pos_value
+            self._dc_pos_pub.publish(msg)
         
         dir_msg = Bool()
         dir_msg.data = not self._dc_direction_cw
@@ -605,6 +783,18 @@ class ArduinoDashboard(Plugin):
     def _sensor_callback(self, msg):
         """Handle sensor update from Arduino"""
         self._signals.sensor_changed.emit(msg.data)
+    
+    def _pot_callback(self, msg):
+        """Handle potentiometer update from Arduino"""
+        self._signals.pot_changed.emit(msg.data)
+    
+    def _fsr_callback(self, msg):
+        """Handle FSR update from Arduino"""
+        self._signals.fsr_changed.emit(msg.data)
+    
+    def _encoder_callback(self, msg):
+        """Handle encoder update from Arduino"""
+        self._signals.encoder_changed.emit(msg.data)
         
     def _on_state_changed(self, state):
         """Update state label (called from main thread)"""
@@ -643,10 +833,52 @@ class ArduinoDashboard(Plugin):
     def _on_sensor_changed(self, value):
         """Update sensor label (called from main thread)"""
         self._sensor_value = value
-        self._sensor_label.setText(f"{value:.1f}")
-        # Update progress bar (assuming 0-100 range)
-        bar_value = min(100, max(0, int(value)))
-        self._sensor_bar.setValue(bar_value)
+    
+    def _on_pot_changed(self, value):
+        """Update potentiometer display (called from main thread)"""
+        self._pot_value = value
+        self._pot_value_label.setText(str(value))
+        self._pot_bar.setValue(value)
+    
+    def _on_fsr_changed(self, value):
+        """Update FSR display (called from main thread)"""
+        self._fsr_value = value
+        self._fsr_value_label.setText(str(value))
+        self._fsr_bar.setValue(value)
+        
+        # Change color based on pressure level
+        if value < 500:
+            self._fsr_value_label.setStyleSheet("""
+                font-size: 18px; 
+                font-weight: bold; 
+                color: #38a169;
+                background-color: #f0fff4;
+                border-radius: 6px;
+                padding: 5px 10px;
+            """)
+        elif value < 2000:
+            self._fsr_value_label.setStyleSheet("""
+                font-size: 18px; 
+                font-weight: bold; 
+                color: #d69e2e;
+                background-color: #fefcbf;
+                border-radius: 6px;
+                padding: 5px 10px;
+            """)
+        else:
+            self._fsr_value_label.setStyleSheet("""
+                font-size: 18px; 
+                font-weight: bold; 
+                color: #e53e3e;
+                background-color: #fff5f5;
+                border-radius: 6px;
+                padding: 5px 10px;
+            """)
+    
+    def _on_encoder_changed(self, value):
+        """Update encoder display (called from main thread)"""
+        self._encoder_value = value
+        self._encoder_value_label.setText(str(value))
             
     def _update_ros(self):
         """Process ROS callbacks"""
@@ -662,12 +894,14 @@ class ArduinoDashboard(Plugin):
         instance_settings.set_value('step', self._step_value)
         instance_settings.set_value('dc_vel', self._dc_vel_value)
         instance_settings.set_value('dc_pos', self._dc_pos_value)
+        instance_settings.set_value('dc_control_mode', self._dc_control_mode)
         
     def restore_settings(self, plugin_settings, instance_settings):
         servo = instance_settings.value('servo', 0)
         step = instance_settings.value('step', 0)
         dc_vel = instance_settings.value('dc_vel', 0)
         dc_pos = instance_settings.value('dc_pos', 0)
+        dc_mode = instance_settings.value('dc_control_mode', 'velocity')
         
         if servo and len(self._sliders) > 0:
             self._sliders[0].setValue(int(servo))
@@ -677,3 +911,5 @@ class ArduinoDashboard(Plugin):
             self._sliders[2].setValue(int(dc_vel))
         if dc_pos and len(self._sliders) > 3:
             self._sliders[3].setValue(int(dc_pos))
+        if dc_mode == 'position':
+            self._dc_position_radio.setChecked(True)
