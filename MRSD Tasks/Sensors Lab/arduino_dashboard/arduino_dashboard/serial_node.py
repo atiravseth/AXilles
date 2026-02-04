@@ -32,7 +32,7 @@ class ArduinoSerialNode(Node):
         super().__init__('arduino_serial_node')
         
         # Parameters
-        self.declare_parameter('port', '/dev/ttyACM1')
+        self.declare_parameter('port', '/dev/ttyUSB0')
         self.declare_parameter('baudrate', 115200)
         self.declare_parameter('simulation', False)
         
@@ -77,7 +77,7 @@ class ArduinoSerialNode(Node):
         # Publishers for state and sensor data (from Arduino)
         self.state_pub = self.create_publisher(Int32, '/arduino/state', 10)
         self.sensor_pub = self.create_publisher(Float32, '/arduino/sensor', 10)
-        self.potentiometer_pub = self.create_publisher(Int32, '/arduino/potentiometer', 10)
+        self.potentiometer_pub = self.create_publisher(Int32, '/arduino/pot', 10)
         self.fsr_pub = self.create_publisher(Int32, '/arduino/fsr', 10)
         self.encoder_pub = self.create_publisher(Int32, '/arduino/encoder', 10)
         
