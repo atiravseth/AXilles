@@ -19,7 +19,6 @@ class SignalBridge(QObject):
     pot_changed = Signal(int)
     fsr_changed = Signal(int)
     encoder_changed = Signal(int)
-    velocity_changed = Signal(int)
     tof_changed = Signal(list)
 
 
@@ -101,7 +100,6 @@ class ArduinoDashboard(Plugin):
         self._signals.pot_changed.connect(self._on_pot_changed)
         self._signals.fsr_changed.connect(self._on_fsr_changed)
         self._signals.encoder_changed.connect(self._on_encoder_changed)
-        self._signals.velocity_changed.connect(self._on_velocity_changed)
         self._signals.tof_changed.connect(self._on_tof_changed)
         
         # Current values
@@ -117,7 +115,6 @@ class ArduinoDashboard(Plugin):
         self._pot_value = 0
         self._fsr_value = 0
         self._encoder_value = 0
-        self._velocity_value = 0  # Current velocity in °/s
         self._tof_data = [0] * 64  # TOF 8x8 data
         self._control_mode = 1  # 1 = GUI Control, 2 = Sensor-Based Autonomous
         self._fsr_level = None
@@ -285,7 +282,7 @@ class ArduinoDashboard(Plugin):
         motor_configs = [
             ("SERVO", 0, 180, "°"),
             ("STEP", 0, 360, "°"),  # Degrees: 360° = 1600 steps
-            ("DC VEL", 0, 720, "°/s"),  # Changed from PWM (0-255) to velocity (°/s)
+            ("DC VEL", 0, 103, "RPM"),  # RPM display, converted to PWM (0-255) internally
             ("DC POS", 0, 1620, "°")  # Degrees: 1620° = 450 encoder values
         ]
         
@@ -572,30 +569,6 @@ class ArduinoDashboard(Plugin):
         enc_layout.addStretch()
         enc_layout.addWidget(self._encoder_value_label)
         sensors_layout.addLayout(enc_layout)
-        
-        # Velocity reading (°/s)
-        vel_layout = QHBoxLayout()
-        vel_icon = QLabel("🔄")
-        vel_icon.setStyleSheet("font-size: 20px;")
-        vel_label = QLabel("VEL:")
-        vel_label.setStyleSheet("font-weight: bold; color: #4a5568;")
-        self._velocity_value_label = QLabel("0 °/s")
-        self._velocity_value_label.setStyleSheet("""
-            font-size: 18px; 
-            font-weight: bold; 
-            color: #805ad5;
-            background-color: #faf5ff;
-            border-radius: 6px;
-            padding: 5px 10px;
-        """)
-        self._velocity_value_label.setMinimumWidth(80)
-        self._velocity_value_label.setAlignment(Qt.AlignCenter)
-        vel_layout.addWidget(vel_icon)
-        vel_layout.addWidget(vel_label)
-        vel_layout.addStretch()
-        vel_layout.addWidget(self._velocity_value_label)
-        sensors_layout.addLayout(vel_layout)
-        
         sensors_group.setLayout(sensors_layout)
         right_column.addWidget(sensors_group)
         
@@ -652,9 +625,6 @@ class ArduinoDashboard(Plugin):
             Int32, '/arduino/encoder',
             self._encoder_callback, 10)
         self._node.create_subscription(
-            Int32, '/arduino/velocity',
-            self._velocity_callback, 10)
-        self._node.create_subscription(
             Int32MultiArray, '/arduino/tof',
             self._tof_callback, 10)
     
@@ -705,11 +675,13 @@ class ArduinoDashboard(Plugin):
             self._step_pub.publish(msg)
         
     def _on_dc_vel_changed(self, value):
-        """Handle DC velocity slider change"""
-        self._dc_vel_value = value
+        """Handle DC velocity slider change - converts RPM (0-103) to PWM (0-255)"""
+        # Convert RPM to PWM: 103 RPM = 255 PWM
+        pwm_value = int((value / 103.0) * 255)
+        self._dc_vel_value = pwm_value
         if self._gui_on and self._dc_control_mode == 'velocity':
             msg = Int32()
-            msg.data = value
+            msg.data = pwm_value
             self._dc_vel_pub.publish(msg)
         
     def _on_dc_pos_changed(self, value):
@@ -910,10 +882,6 @@ class ArduinoDashboard(Plugin):
         """Handle encoder update from Arduino"""
         self._signals.encoder_changed.emit(msg.data)
     
-    def _velocity_callback(self, msg):
-        """Handle velocity update from Arduino (°/s)"""
-        self._signals.velocity_changed.emit(msg.data)
-    
     def _tof_callback(self, msg):
         """Handle TOF 8x8 depth data from Arduino"""
         self._signals.tof_changed.emit(list(msg.data))
@@ -1016,13 +984,6 @@ class ArduinoDashboard(Plugin):
             return
         self._encoder_value = value
         self._encoder_value_label.setText(str(value))
-    
-    def _on_velocity_changed(self, value):
-        """Update velocity display (called from main thread)"""
-        if value == self._velocity_value:
-            return
-        self._velocity_value = value
-        self._velocity_value_label.setText(f"{value} °/s")
     
     def _on_tof_changed(self, data):
         """Update TOF depth visualization (called from main thread)"""

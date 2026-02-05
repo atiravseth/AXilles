@@ -257,6 +257,7 @@ void setup() {
   
   // Set ADC resolution
   analogReadResolution(12);
+  analogSetAttenuation(ADC_11db);
   
   // Initialize I2C for TOF sensor with error handling
   Wire.begin(TOF_SDA_PIN, TOF_SCL_PIN);
@@ -335,9 +336,9 @@ void loop() {
     // Update DC motor based on control mode
     if (dcControlMode == "position") {
       updateDCMotorPosition();
-    } else if (dcControlMode == "velocity") {
-      updateDCMotorVelocity();  // Closed-loop velocity control
     }
+    // Note: velocity mode uses direct PWM control via W command
+    // No need to call updateDCMotorVelocity() - motor is controlled directly
     
   } else if (controlMode == 2) {
     // Sensor-Based Autonomous Mode
@@ -586,12 +587,19 @@ void parseCommand(String cmd) {
       }
       break;
     
-    case 'W':  // DC motor velocity in °/s - velocity mode (closed-loop)
+    case 'W':  // DC motor PWM (0-255) - direct PWM control
     case 'w':
       {
-        float value = cmd.substring(1).toFloat();
+        int value = cmd.substring(1).toInt();
         if (controlMode == 1 && dcControlMode == "velocity") {
-          setDCVelocityTarget(value);
+          // Direct PWM control - value is already 0-255
+          int pwmVal = constrain(value, 0, 255);
+          dcVelocity = pwmVal;
+          if (pwmVal > 0) {
+            setMotor(dcDirectionCW ? 1 : -1, pwmVal, DC_PWM_PIN, DC_IN1_PIN, DC_IN2_PIN);
+          } else {
+            stopDCMotor();
+          }
         }
       }
       break;
@@ -652,7 +660,7 @@ void setControlMode(int mode) {
     if (mode == 1) {
       // Switching to GUI mode - stop autonomous control
       stopDCMotor();
-      dcPID.reset();
+      dcVelPID.reset();
     } else {
       // Switching to autonomous mode
       // Motors will be controlled by sensors
@@ -767,6 +775,10 @@ void stopDCMotor() {
 
 // ==================== SENSOR READING ====================
 void readSensors() {
+
+  int potValue_el = 0; 
+  int fsrValue_el = 0;
+
   potValue_el = analogRead(POTENTIOMETER_PIN);
   potValue = potValue_el * 9380 / 4095 + 2;
   fsrRaw = analogRead(FSR_PIN);

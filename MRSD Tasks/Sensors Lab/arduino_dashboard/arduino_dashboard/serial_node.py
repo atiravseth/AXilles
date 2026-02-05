@@ -79,7 +79,9 @@ class ArduinoSerialNode(Node):
         self._dc_vel_cmd = 0
         self._dc_pos_cmd = 0
         self._dc_dir_ccw = False  # False = CW, True = CCW
-        self._gui_on = False
+        # Note: _gui_on may already be set True by auto_enable_gui, don't overwrite
+        if not hasattr(self, '_gui_on'):
+            self._gui_on = False
         self._control_mode = 1  # 1 = GUI, 2 = Sensor-based autonomous
         self._dc_control_mode = 'velocity'  # 'velocity' or 'position'  # ADDED
         
