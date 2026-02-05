@@ -9,8 +9,8 @@ from python_qt_binding.QtWidgets import (
     QGroupBox, QSpinBox, QProgressBar, QRadioButton, QButtonGroup
 )
 from python_qt_binding.QtCore import Qt, QTimer, Signal, QObject
-from python_qt_binding.QtGui import QFont, QPalette, QColor
-from std_msgs.msg import Int32, Bool, String, Float32
+from python_qt_binding.QtGui import QFont, QPalette, QColor, QPainter, QBrush, QPen
+from std_msgs.msg import Int32, Bool, String, Float32, Int32MultiArray
 
 class SignalBridge(QObject):
     """Bridge for thread-safe signal emission"""
@@ -19,6 +19,66 @@ class SignalBridge(QObject):
     pot_changed = Signal(int)
     fsr_changed = Signal(int)
     encoder_changed = Signal(int)
+    velocity_changed = Signal(int)
+    tof_changed = Signal(list)
+
+
+class TofDepthWidget(QWidget):
+    """Widget to display 8x8 TOF depth data as a point cloud visualization"""
+    def __init__(self, parent=None):
+        super(TofDepthWidget, self).__init__(parent)
+        self.setMinimumSize(160, 160)
+        self.setMaximumSize(200, 200)
+        self._data = [0] * 64  # 8x8 depth values in mm
+        self._max_distance = 4000  # Max distance in mm for scaling
+        self._min_radius = 2
+        self._max_radius = 12
+        
+    def setData(self, data):
+        """Set the 8x8 depth data (64 values)"""
+        if len(data) == 64:
+            self._data = data
+            self.update()
+    
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Black background
+        painter.fillRect(self.rect(), QColor(0, 0, 0))
+        
+        # Calculate cell size
+        w = self.width()
+        h = self.height()
+        cell_w = w / 8
+        cell_h = h / 8
+        
+        # Cyan color for dots
+        cyan = QColor(0, 255, 255)
+        painter.setPen(Qt.NoPen)
+        
+        for i in range(8):
+            for j in range(8):
+                idx = i * 8 + j
+                distance = self._data[idx]
+                
+                # Map distance to radius (small distance = large radius)
+                if distance <= 0 or distance > self._max_distance:
+                    radius = self._min_radius
+                else:
+                    # Inverse mapping: closer = larger radius
+                    ratio = 1.0 - (distance / self._max_distance)
+                    radius = self._min_radius + ratio * (self._max_radius - self._min_radius)
+                
+                # Draw the dot
+                cx = j * cell_w + cell_w / 2
+                cy = i * cell_h + cell_h / 2
+                
+                painter.setBrush(QBrush(cyan))
+                painter.drawEllipse(int(cx - radius), int(cy - radius), 
+                                   int(radius * 2), int(radius * 2))
+        
+        painter.end()
 
 class ArduinoDashboard(Plugin):
     def __init__(self, context):
@@ -41,6 +101,8 @@ class ArduinoDashboard(Plugin):
         self._signals.pot_changed.connect(self._on_pot_changed)
         self._signals.fsr_changed.connect(self._on_fsr_changed)
         self._signals.encoder_changed.connect(self._on_encoder_changed)
+        self._signals.velocity_changed.connect(self._on_velocity_changed)
+        self._signals.tof_changed.connect(self._on_tof_changed)
         
         # Current values
         self._servo_value = 0
@@ -55,7 +117,11 @@ class ArduinoDashboard(Plugin):
         self._pot_value = 0
         self._fsr_value = 0
         self._encoder_value = 0
+        self._velocity_value = 0  # Current velocity in °/s
+        self._tof_data = [0] * 64  # TOF 8x8 data
         self._control_mode = 1  # 1 = GUI Control, 2 = Sensor-Based Autonomous
+        self._fsr_level = None
+        self._last_state = None
         
         # Build the UI
         self._create_ui()
@@ -218,9 +284,9 @@ class ArduinoDashboard(Plugin):
         # Create vertical sliders for each motor
         motor_configs = [
             ("SERVO", 0, 180, "°"),
-            ("STEP", 0, 200, ""),
-            ("DC VEL", 0, 255, ""),
-            ("DC POS", 0, 1000, "")
+            ("STEP", 0, 360, "°"),  # Degrees: 360° = 1600 steps
+            ("DC VEL", 0, 720, "°/s"),  # Changed from PWM (0-255) to velocity (°/s)
+            ("DC POS", 0, 1620, "°")  # Degrees: 1620° = 450 encoder values
         ]
         
         self._sliders = []
@@ -292,7 +358,7 @@ class ArduinoDashboard(Plugin):
         dc_mode_layout.addWidget(self._dc_position_radio)
         
         # Info label
-        self._dc_mode_info = QLabel("VEL: Direct PWM control")
+        self._dc_mode_info = QLabel("VEL: Closed-loop velocity (°/s)")
         self._dc_mode_info.setStyleSheet("color: #718096; font-size: 10px; padding: 5px;")
         self._dc_mode_info.setWordWrap(True)
         dc_mode_layout.addWidget(self._dc_mode_info)
@@ -434,7 +500,7 @@ class ArduinoDashboard(Plugin):
         # Potentiometer progress bar
         self._pot_bar = QProgressBar()
         self._pot_bar.setMinimum(0)
-        self._pot_bar.setMaximum(4095)
+        self._pot_bar.setMaximum(9370)  # Updated range: 0-9370
         self._pot_bar.setValue(0)
         self._pot_bar.setTextVisible(False)
         self._pot_bar.setFixedHeight(8)
@@ -466,7 +532,7 @@ class ArduinoDashboard(Plugin):
         # FSR progress bar
         self._fsr_bar = QProgressBar()
         self._fsr_bar.setMinimum(0)
-        self._fsr_bar.setMaximum(4095)
+        self._fsr_bar.setMaximum(981)  # Updated range: 0-981
         self._fsr_bar.setValue(0)
         self._fsr_bar.setTextVisible(False)
         self._fsr_bar.setFixedHeight(8)
@@ -507,8 +573,46 @@ class ArduinoDashboard(Plugin):
         enc_layout.addWidget(self._encoder_value_label)
         sensors_layout.addLayout(enc_layout)
         
+        # Velocity reading (°/s)
+        vel_layout = QHBoxLayout()
+        vel_icon = QLabel("🔄")
+        vel_icon.setStyleSheet("font-size: 20px;")
+        vel_label = QLabel("VEL:")
+        vel_label.setStyleSheet("font-weight: bold; color: #4a5568;")
+        self._velocity_value_label = QLabel("0 °/s")
+        self._velocity_value_label.setStyleSheet("""
+            font-size: 18px; 
+            font-weight: bold; 
+            color: #805ad5;
+            background-color: #faf5ff;
+            border-radius: 6px;
+            padding: 5px 10px;
+        """)
+        self._velocity_value_label.setMinimumWidth(80)
+        self._velocity_value_label.setAlignment(Qt.AlignCenter)
+        vel_layout.addWidget(vel_icon)
+        vel_layout.addWidget(vel_label)
+        vel_layout.addStretch()
+        vel_layout.addWidget(self._velocity_value_label)
+        sensors_layout.addLayout(vel_layout)
+        
         sensors_group.setLayout(sensors_layout)
         right_column.addWidget(sensors_group)
+        
+        # TOF Depth Visualization Widget
+        tof_group = QGroupBox("📡 TOF Depth (8x8)")
+        tof_layout = QVBoxLayout()
+        
+        self._tof_widget = TofDepthWidget()
+        tof_layout.addWidget(self._tof_widget, alignment=Qt.AlignCenter)
+        
+        tof_info = QLabel("Cyan dots: closer = larger")
+        tof_info.setStyleSheet("color: #718096; font-size: 10px;")
+        tof_info.setAlignment(Qt.AlignCenter)
+        tof_layout.addWidget(tof_info)
+        
+        tof_group.setLayout(tof_layout)
+        right_column.addWidget(tof_group)
         
         right_column.addStretch()
         
@@ -547,13 +651,19 @@ class ArduinoDashboard(Plugin):
         self._node.create_subscription(
             Int32, '/arduino/encoder',
             self._encoder_callback, 10)
+        self._node.create_subscription(
+            Int32, '/arduino/velocity',
+            self._velocity_callback, 10)
+        self._node.create_subscription(
+            Int32MultiArray, '/arduino/tof',
+            self._tof_callback, 10)
     
     # ==================== NEW: DC CONTROL MODE HANDLER ====================
     def _on_dc_mode_changed(self, checked):
         """Handle DC motor control mode change"""
         if self._dc_velocity_radio.isChecked():
             self._dc_control_mode = 'velocity'
-            self._dc_mode_info.setText("VEL: Direct PWM control")
+            self._dc_mode_info.setText("VEL: Closed-loop velocity (°/s)")
             # Enable velocity slider, disable position slider
             self._sliders[2].setEnabled(True)
             self._spinboxes[2].setEnabled(True)
@@ -585,11 +695,13 @@ class ArduinoDashboard(Plugin):
             self._servo_pub.publish(msg)
         
     def _on_step_changed(self, value):
-        """Handle step slider change"""
-        self._step_value = value
+        """Handle step slider change - converts degrees to steps (360° = 1600 steps)"""
+        # Convert degrees to steps: 360 degrees = 1600 steps
+        steps = int((value / 360.0) * 1600)
+        self._step_value = steps
         if self._gui_on:
             msg = Int32()
-            msg.data = value
+            msg.data = steps
             self._step_pub.publish(msg)
         
     def _on_dc_vel_changed(self, value):
@@ -601,11 +713,13 @@ class ArduinoDashboard(Plugin):
             self._dc_vel_pub.publish(msg)
         
     def _on_dc_pos_changed(self, value):
-        """Handle DC position slider change"""
-        self._dc_pos_value = value
+        """Handle DC position slider change - converts degrees to encoder values (1620° = 450 encoder)"""
+        # Convert degrees to encoder values: 1620 degrees = 450 encoder values
+        encoder_value = int((value / 1620.0) * 450)
+        self._dc_pos_value = encoder_value
         if self._gui_on and self._dc_control_mode == 'position':
             msg = Int32()
-            msg.data = value
+            msg.data = encoder_value
             self._dc_pos_pub.publish(msg)
         
     def _on_dc_dir_changed(self, state):
@@ -795,9 +909,20 @@ class ArduinoDashboard(Plugin):
     def _encoder_callback(self, msg):
         """Handle encoder update from Arduino"""
         self._signals.encoder_changed.emit(msg.data)
+    
+    def _velocity_callback(self, msg):
+        """Handle velocity update from Arduino (°/s)"""
+        self._signals.velocity_changed.emit(msg.data)
+    
+    def _tof_callback(self, msg):
+        """Handle TOF 8x8 depth data from Arduino"""
+        self._signals.tof_changed.emit(list(msg.data))
         
     def _on_state_changed(self, state):
         """Update state label (called from main thread)"""
+        if state == self._last_state:
+            return
+        self._last_state = state
         self._current_state = state
         if state == 1:
             self._state_label.setText("1\nGUI")
@@ -836,49 +961,75 @@ class ArduinoDashboard(Plugin):
     
     def _on_pot_changed(self, value):
         """Update potentiometer display (called from main thread)"""
+        if value == self._pot_value:
+            return
         self._pot_value = value
         self._pot_value_label.setText(str(value))
         self._pot_bar.setValue(value)
     
     def _on_fsr_changed(self, value):
         """Update FSR display (called from main thread)"""
+        if value == self._fsr_value:
+            return
         self._fsr_value = value
         self._fsr_value_label.setText(str(value))
         self._fsr_bar.setValue(value)
         
-        # Change color based on pressure level
+        # Change color only when pressure level changes
         if value < 500:
-            self._fsr_value_label.setStyleSheet("""
+            level = 0
+            style = """
                 font-size: 18px; 
                 font-weight: bold; 
                 color: #38a169;
                 background-color: #f0fff4;
                 border-radius: 6px;
                 padding: 5px 10px;
-            """)
+            """
         elif value < 2000:
-            self._fsr_value_label.setStyleSheet("""
+            level = 1
+            style = """
                 font-size: 18px; 
                 font-weight: bold; 
                 color: #d69e2e;
                 background-color: #fefcbf;
                 border-radius: 6px;
                 padding: 5px 10px;
-            """)
+            """
         else:
-            self._fsr_value_label.setStyleSheet("""
+            level = 2
+            style = """
                 font-size: 18px; 
                 font-weight: bold; 
                 color: #e53e3e;
                 background-color: #fff5f5;
                 border-radius: 6px;
                 padding: 5px 10px;
-            """)
+            """
+        if level != self._fsr_level:
+            self._fsr_level = level
+            self._fsr_value_label.setStyleSheet(style)
     
     def _on_encoder_changed(self, value):
         """Update encoder display (called from main thread)"""
+        if value == self._encoder_value:
+            return
         self._encoder_value = value
         self._encoder_value_label.setText(str(value))
+    
+    def _on_velocity_changed(self, value):
+        """Update velocity display (called from main thread)"""
+        if value == self._velocity_value:
+            return
+        self._velocity_value = value
+        self._velocity_value_label.setText(f"{value} °/s")
+    
+    def _on_tof_changed(self, data):
+        """Update TOF depth visualization (called from main thread)"""
+        if data == self._tof_data:
+            return
+        self._tof_data = data
+        self._tof_widget.setData(data)
             
     def _update_ros(self):
         """Process ROS callbacks"""
