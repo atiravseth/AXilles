@@ -1,0 +1,82 @@
+data:
+  apply_filter: false
+  use_all_directions: true
+  use_all_speeds: true
+feature_sets:
+  active: full
+  full:
+  - imu_foot_Accel_X
+  - imu_foot_Accel_Y
+  - imu_foot_Accel_Z
+  - imu_foot_Gyro_X
+  - imu_foot_Gyro_Y
+  - imu_foot_Gyro_Z
+  - imu_shank_Accel_X
+  - imu_shank_Accel_Y
+  - imu_shank_Accel_Z
+  - imu_shank_Gyro_X
+  - imu_shank_Gyro_Y
+  - imu_shank_Gyro_Z
+  - imu_thigh_Accel_X
+  - imu_thigh_Accel_Y
+  - imu_thigh_Accel_Z
+  - imu_thigh_Gyro_X
+  - imu_thigh_Gyro_Y
+  - imu_thigh_Gyro_Z
+  - fp_Treadmill_R_vy
+  - fp_Treadmill_R_px
+  - fp_Treadmill_R_pz
+  - gon_ankle_sagittal
+  mid:
+  - imu_foot_Accel_X
+  - imu_foot_Accel_Y
+  - imu_foot_Accel_Z
+  - imu_foot_Gyro_X
+  - imu_foot_Gyro_Y
+  - imu_foot_Gyro_Z
+  - imu_shank_Accel_X
+  - imu_shank_Accel_Y
+  - imu_shank_Accel_Z
+  - imu_shank_Gyro_X
+  - imu_shank_Gyro_Y
+  - imu_shank_Gyro_Z
+  - fp_Treadmill_R_vy
+  - fp_Treadmill_R_px
+  - fp_Treadmill_R_pz
+  - gon_ankle_sagittal
+  minimal:
+  - imu_foot_Accel_X
+  - imu_foot_Accel_Y
+  - imu_foot_Accel_Z
+  - imu_foot_Gyro_X
+  - imu_foot_Gyro_Y
+  - imu_foot_Gyro_Z
+  - fp_Treadmill_R_vy
+  - fp_Treadmill_R_px
+  - fp_Treadmill_R_pz
+  - gon_ankle_sagittal
+model:
+  min_segment_length: 200
+  stride: 10
+  subject_split:
+    test_subjects:
+    - AB10
+    train_subjects:
+    - AB06
+    - AB07
+    - AB08
+    - AB11
+    - AB12
+    - AB13
+    - AB14
+    val_subjects:
+    - AB09
+  walking_directions:
+  - cw
+  - ccw
+  walking_speeds:
+  - fast
+  - normal
+  - slow
+paths:
+  data_root_dir: /Users/narayanan/PycharmProjects/MRSD_exoskeleton/processed_zscore_data
