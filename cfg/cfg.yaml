@@ -1,6 +1,6 @@
 paths:
-  data_root_dir: "/Users/narayanan/PycharmProjects/MRSD_exoskeleton/processed_zscore_data"
-  demographics_csv: "/Users/narayanan/PycharmProjects/MRSD_exoskeleton/csv_output/subject_info.csv"
+  data_root_dir: "/Users/narayanan/PycharmProjects/exo-data/processed_zscore_data"
+  demographics_csv: "/Users/narayanan/PycharmProjects/exo-data/csv_output/subject_info.csv"
 
 model:
   subject_split:
